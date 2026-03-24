@@ -70,16 +70,24 @@ Follow these steps to run the Script Analysis System locally:
    cd content_agent
    ```
 
-2. **Create and activate a virtual environment**
+2. **Environment Setup & Dependencies (using `uv`)**
+   We recommend using [`uv`](https://github.com/astral-sh/uv) for lightning-fast environment setup:
+   
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use: venv\Scripts\activate
+   # Install uv (if you haven't already)
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   
+   # Create a virtual environment
+   uv venv
+   
+   # Activate the environment
+   source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+   
+   # Install dependencies
+   uv pip install -r requirements.txt
    ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+   
+   *(Alternatively, you can use standard `python -m venv venv` and `pip install -r requirements.txt`)*
 
 4. **Environment Variables**
    Create a `.env` file in the root directory and add your OpenAI API key:
