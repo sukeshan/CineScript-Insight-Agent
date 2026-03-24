@@ -1,7 +1,7 @@
 import operator
 from typing import Annotated, TypedDict, Any
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 
 from agents.summary import run_summary
 from agents.characters import run_character_analysis
@@ -100,37 +100,34 @@ def finalize_node(state: PipelineState) -> dict:
     return {"context": ctx}
 
 
-# ── Graph Builder ─────────────────────────────────────────────────────────────
+# --- Graph Definition ---
 
 def build_phase1_graph() -> StateGraph:
-    """
-    Construct and compile the Phase 1 LangGraph.
-    Flow: START → summary → [character, entity, scene_splitter] (parallel) → skills_index → finalize → END
-    """
     builder = StateGraph(PipelineState)
-
-    # Add nodes
-    builder.add_node("summary", summary_node)
+    
     builder.add_node("character", character_node)
     builder.add_node("entity", entity_node)
     builder.add_node("scene_splitter", scene_splitter_node)
     builder.add_node("skills_index", skills_index_node)
     builder.add_node("finalize", finalize_node)
+    
+    # START -> [character, entity, scene_splitter]
+    builder.add_edge(START, "character")
+    builder.add_edge(START, "entity")
+    builder.add_edge(START, "scene_splitter")
+    
+    # [character, entity, scene_splitter] -> skills_index
+    # We use a conditional fan-in technique: wait for all 3 to populate
+    def check_parallel_completion(state: PipelineState):
+        if state.get("characters_out") and state.get("entities_out") and state.get("scene_files"):
+            return "skills_index"
+        return END  # Wait for the others to finish
+        
+    builder.add_conditional_edges("character", check_parallel_completion)
+    builder.add_conditional_edges("entity", check_parallel_completion)
+    builder.add_conditional_edges("scene_splitter", check_parallel_completion)
 
-    # START → summary (seeds KV cache)
-    builder.set_entry_point("summary")
-
-    # summary → [character, entity, scene_splitter] (parallel fan-out)
-    builder.add_edge("summary", "character")
-    builder.add_edge("summary", "entity")
-    builder.add_edge("summary", "scene_splitter")
-
-    # [character, entity, scene_splitter] → skills_index (fan-in)
-    builder.add_edge("character", "skills_index")
-    builder.add_edge("entity", "skills_index")
-    builder.add_edge("scene_splitter", "skills_index")
-
-    # skills_index → finalize → END
+    # skills_index -> finalize -> END
     builder.add_edge("skills_index", "finalize")
     builder.add_edge("finalize", END)
 
@@ -142,20 +139,26 @@ phase1_graph = build_phase1_graph()
 
 # ── Async Generator wrapper for Streamlit ───────────────────────────────────
 
-async def process_script_stream(script: str):
-    """
-    Yields status tuples ("status", message),
-    then yields ("summary", summary_data) as soon as the summary node finishes,
-    and finally yields ("context", ScriptContext) when the whole graph finishes.
-    """
+async def get_summary_only(script: str):
+    """Run ONLY the summary agent and return its output."""
     import os
     os.makedirs("outputs", exist_ok=True)
     os.makedirs("outputs/scenes", exist_ok=True)
     os.makedirs("outputs/skills", exist_ok=True)
     
+    summary_out = await run_summary(script)
+    return summary_out
+
+
+async def run_remaining_pipeline_stream(script: str, summary_out):
+    """
+    Yields status tuples ("status", message),
+    and finally yields ("context", ScriptContext) when the whole graph finishes.
+    Assumes summary_out is already computed and passed in.
+    """
     inputs = {
         "raw_script": script,
-        "summary": None,
+        "summary": summary_out,
         "characters_out": None,
         "entities_out": None,
         "scene_files": None,
@@ -163,12 +166,10 @@ async def process_script_stream(script: str):
         "context": None
     }
     
-    summary_yielded = False
     final_context = None
 
     # Node friendly names
     status_msg_map = {
-        "summary": "Generating summary...",
         "character": "Extracting characters...",
         "entity": "Parsing entities...",
         "scene_splitter": "Splitting scenes...",
@@ -178,15 +179,23 @@ async def process_script_stream(script: str):
 
     async for event in phase1_graph.astream(inputs, stream_mode="updates"):
         # Yield status for whatever nodes just completed or were updated
-        for node_name in event.keys():
+        for node_name, node_output in event.items():
             if isinstance(node_name, str) and node_name in status_msg_map:
-                yield "status", status_msg_map[node_name]
+                thoughts = []
+                if isinstance(node_output, dict):
+                    for val in node_output.values():
+                        if hasattr(val, "thoughts") and getattr(val, "thoughts"):
+                            for t in getattr(val, "thoughts"):
+                                if hasattr(t, "thought"):
+                                    thoughts.append(getattr(t, "thought"))
+                        elif hasattr(val, "thought") and getattr(val, "thought"):
+                            thoughts.append(getattr(val, "thought"))
+                            
+                yield "status", {"message": status_msg_map[node_name], "thoughts": thoughts}
                 
-        if "summary" in event and not summary_yielded:
-            yield "summary", event.get("summary", {}).get("summary", [])
-            summary_yielded = True
-            
+        # Capture final context when it appears
         if "finalize" in event:
-            final_context = event["finalize"]["context"]
+            final_context = event["finalize"].get("context")
             
-    yield "context", final_context
+    if final_context:
+        yield "context", final_context

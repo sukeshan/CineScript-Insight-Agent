@@ -51,7 +51,7 @@ async def call_llm_structured(
     response_model: Type[BaseModel],
     *,
     temperature: float = 0.3,
-    max_retries: int = 2,
+    max_retries: int = 4,
 ) -> tuple[BaseModel, dict[str, int]]:
     """
     Async LLM call → validated Pydantic object + token usage.

@@ -6,7 +6,8 @@ Verifies: summary, characters, entities, scene segmentation, skills index.
 import asyncio
 import os
 import docx
-from core.pipeline import process_script_stream
+import pytest
+from core.pipeline import get_summary_only, run_remaining_pipeline_stream
 from core.prompts import build_main_prompt
 
 
@@ -22,23 +23,27 @@ async def main():
     script_path = os.path.join("docs", "Bullet  Assignment.docx")
     script = read_docx(script_path)
     
-    stream = process_script_stream(script)
+    print("⏳ Generating summary...")
+    summary = await get_summary_only(script)
+    print("✅ SUMMARY:")
+    for point in summary.summary:
+        print(f"  - {point}")
+
+    # Exhaust stream
+    stream = run_remaining_pipeline_stream(script, summary)
     
     # Run through the stream
-    summary = None
     context = None
     
     async for event_type, data in stream:
         if event_type == "status":
-            print(f"⏳ {data}")
-        elif event_type == "summary":
-            summary = data
-            print("✅ SUMMARY:")
-            print("\n".join(f"- {s}" for s in summary.summary))
+            print(f"⏳ {data.get('message', '')}")
+            for t in data.get('thoughts', []):
+                print(f"   💭 {t}")
         elif event_type == "context":
             context = data
+            print("\n✅ FULL CONTEXT:")
 
-    print("\n✅ FULL CONTEXT:")
     print(f"- Characters: {len(context.characters)}")
     for c in context.characters:
         print(f"  * {c.name} ({c.role})")

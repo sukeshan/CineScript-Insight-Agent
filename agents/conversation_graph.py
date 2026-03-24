@@ -28,13 +28,18 @@ class AgentAction(BaseModel):
             "- 'final_answer': use ONLY when you have gathered all necessary information and are ready to respond to the user."
         )
     )
-    tool_args: dict[str, str] = Field(
+    tool_args: dict[str, Any] = Field(
+        default_factory=dict,
         description=(
-            "The exact arguments required for the chosen tool. "
+            "The arguments required for 'load_file' or 'write_file'. "
             "- For 'load_file': Must contain {'filename': '<path to file>'}. "
             "- For 'write_file': Must contain {'filepath': '<path>', 'content': '<markdown text>'}. "
-            "- For 'final_answer': Must contain {'response': '<your comprehensive reply to the user>'}."
+            "Leave empty if tool_name is 'final_answer'."
         )
+    )
+    response: str | None = Field(
+        default=None,
+        description="If tool_name is 'final_answer', provide your comprehensive reply to the user here. Leave null otherwise."
     )
     follow_up_chips: list[str] | None = Field(
         default=None,
@@ -50,6 +55,7 @@ class AgentAction(BaseModel):
 class ConversationState(TypedDict):
     messages: Annotated[list[dict[str, Any]], operator.add]
     token_count: int  # Running total from API usage — no tiktoken needed
+    compression_triggered: bool  # Signal to the UI when budget is exceeded
 
 # ── Nodes ────────────────────────────────────────────────────────────────────
 
@@ -64,15 +70,21 @@ async def agent_node(state: ConversationState) -> dict:
         with open(skills_index_path, "r", encoding="utf-8") as f:
             skills_content = f.read()
         dynamic_system_prompt = build_main_prompt(skills_content)
-        
-        if current_messages and current_messages[0]["role"] == "system":
-            current_messages[0]["content"] = dynamic_system_prompt
-        else:
-            current_messages.insert(0, {"role": "system", "content": dynamic_system_prompt})
+    else:
+        # Fallback to default prompt without skills content
+        dynamic_system_prompt = build_main_prompt()
+
+    if current_messages and current_messages[0]["role"] == "system":
+        current_messages[0]["content"] = dynamic_system_prompt
+    else:
+        current_messages.insert(0, {"role": "system", "content": dynamic_system_prompt})
 
     # 2. Check if compression is needed using the running token count
     current_token_count = state.get("token_count", 0)
+    compression_active = False
+    
     if should_compress(current_token_count):
+        compression_active = True
         current_messages = drop_raw_script_message(current_messages)
         current_messages = truncate_to_window(current_messages, keep_last_n=10, keep_first=3)
     
@@ -92,7 +104,11 @@ async def agent_node(state: ConversationState) -> dict:
         "content": action.model_dump_json()
     }
     
-    return {"messages": [msg_dict], "token_count": new_token_count}
+    return {
+        "messages": [msg_dict], 
+        "token_count": new_token_count,
+        "compression_triggered": compression_active
+    }
 
 async def tools_node(state: ConversationState) -> dict:
     """Read the last action and execute the requested tool."""
