@@ -1,8 +1,3 @@
-"""
-ScriptContext — single source of truth for all downstream agents.
-Populated during Phase 1 and consumed by Phase 2-4 agents.
-"""
-
 from dataclasses import dataclass, field
 
 from models.characters import Character

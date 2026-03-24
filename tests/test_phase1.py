@@ -24,13 +24,20 @@ async def main():
     
     stream = process_script_stream(script)
     
-    # 1. First yield: summary
-    summary = await anext(stream)
-    print("✅ SUMMARY:")
-    print(summary)
+    # Run through the stream
+    summary = None
+    context = None
     
-    # 2. Second yield: final ScriptContext
-    context = await anext(stream)
+    async for event_type, data in stream:
+        if event_type == "status":
+            print(f"⏳ {data}")
+        elif event_type == "summary":
+            summary = data
+            print("✅ SUMMARY:")
+            print("\n".join(f"- {s}" for s in summary.summary))
+        elif event_type == "context":
+            context = data
+
     print("\n✅ FULL CONTEXT:")
     print(f"- Characters: {len(context.characters)}")
     for c in context.characters:

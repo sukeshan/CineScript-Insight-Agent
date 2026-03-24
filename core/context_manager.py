@@ -1,7 +1,3 @@
-"""
-Context Budget Management.
-Tracks token usage and compresses context when reaching thresholds.
-"""
 import copy
 from typing import Any
 

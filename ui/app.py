@@ -280,10 +280,25 @@ def run_async(coro):
 
 # ── Pipeline Runner ──────────────────────────────────────────────────────────
 
-async def _run_pipeline(script_text: str):
+async def _run_pipeline(script_text: str, status_container, summary_placeholder):
+    """Run pipeline and update UI status dynamically."""
     results = []
-    async for event in process_script_stream(script_text):
-        results.append(event)
+    
+    async for event_type, content in process_script_stream(script_text):
+        if event_type == "status":
+            status_container.update(label=f"⏳ {content}", state="running")
+        elif event_type == "summary":
+            # Show summary immediately on the UI while other nodes keep running
+            summary_text = "\n".join(f"- {s}" for s in content.summary)
+            with summary_placeholder.container():
+                with st.chat_message("assistant", avatar="🎬"):
+                    st.markdown(summary_text)
+
+            results.append(("summary", content))
+        elif event_type == "context":
+            results.append(("context", content))
+            
+    status_container.update(label="✅ Analysis Complete!", state="complete")
     return results
 
 
@@ -418,13 +433,22 @@ if not st.session_state.context:
         doc = Document(uploaded)
         script_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
-        with st.spinner("🔬 Analyzing your script — this may take a moment..."):
-            results = run_async(_run_pipeline(script_text))
+        status_container = st.status("🚀 Starting pipeline...", expanded=False)
+        summary_placeholder = st.empty()
+        
+        results = run_async(_run_pipeline(script_text, status_container, summary_placeholder))
 
-        if len(results) >= 2:
-            summary_out = results[0]
-            context = results[-1]
+        summary_out = None
+        context = None
+        
+        if results:
+            for event_type, data in results:
+                if event_type == "summary":
+                    summary_out = data
+                elif event_type == "context":
+                    context = data
 
+        if summary_out and context:
             st.session_state.summary_out = summary_out
             st.session_state.context = context
             st.session_state.processing = False

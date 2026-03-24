@@ -1,5 +1,6 @@
 from typing import TypedDict, Any, Annotated, Literal
 import operator
+import os
 import json
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END
@@ -7,6 +8,7 @@ from langgraph.graph import StateGraph, START, END
 from core.llm import call_llm_structured
 from core.tools import execute_tool
 from core.context_manager import should_compress, drop_raw_script_message, truncate_to_window
+from core.prompts import build_main_prompt
 
 # ── Structured Agent Action ───────────────────────────────────────────────────
 
@@ -53,9 +55,7 @@ class ConversationState(TypedDict):
 
 async def agent_node(state: ConversationState) -> dict:
     """Call the LLM using structured output and save the action to history."""
-    from core.prompts import build_main_prompt
-    import os
-
+    
     # 1. Dynamically build/refresh the system prompt if skills_index.md exists
     skills_index_path = "outputs/skills_index.md"
     current_messages = list(state["messages"])

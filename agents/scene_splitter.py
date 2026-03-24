@@ -1,8 +1,3 @@
-"""
-Scene Splitter — Phase 1 v2.0.
-Segments a script into individual scene markdown files using Python regex.
-"""
-
 import re
 import os
 from typing import Any

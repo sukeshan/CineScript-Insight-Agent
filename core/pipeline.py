@@ -144,8 +144,9 @@ phase1_graph = build_phase1_graph()
 
 async def process_script_stream(script: str):
     """
-    Yields the summary as soon as the summary node finishes,
-    then yields the final ScriptContext when the whole graph finishes.
+    Yields status tuples ("status", message),
+    then yields ("summary", summary_data) as soon as the summary node finishes,
+    and finally yields ("context", ScriptContext) when the whole graph finishes.
     """
     import os
     os.makedirs("outputs", exist_ok=True)
@@ -165,12 +166,27 @@ async def process_script_stream(script: str):
     summary_yielded = False
     final_context = None
 
+    # Node friendly names
+    status_msg_map = {
+        "summary": "Generating summary...",
+        "character": "Extracting characters...",
+        "entity": "Parsing entities...",
+        "scene_splitter": "Splitting scenes...",
+        "skills_index": "Building skills index...",
+        "finalize": "Finalizing context..."
+    }
+
     async for event in phase1_graph.astream(inputs, stream_mode="updates"):
+        # Yield status for whatever nodes just completed or were updated
+        for node_name in event.keys():
+            if isinstance(node_name, str) and node_name in status_msg_map:
+                yield "status", status_msg_map[node_name]
+                
         if "summary" in event and not summary_yielded:
-            yield event["summary"]["summary"]
+            yield "summary", event.get("summary", {}).get("summary", [])
             summary_yielded = True
             
         if "finalize" in event:
             final_context = event["finalize"]["context"]
             
-    yield final_context
+    yield "context", final_context
