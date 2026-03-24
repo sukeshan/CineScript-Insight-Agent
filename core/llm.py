@@ -64,6 +64,3 @@ async def call_llm_structured(
         temperature=temperature,
         max_retries=max_retries,
     )
-
-
-
