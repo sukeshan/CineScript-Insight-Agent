@@ -1,72 +1,103 @@
-# 🎬 Script Analysis Dashboard
+# Script Analysis System
 
-A premium, AI-powered platform for deep screenplay analysis. This system transforms raw script uploads into structured, actionable insights using a multi-phase agentic architecture.
+An agentic AI system designed to analyze short-form scripts and generate structured storytelling insights through a unified, memory-aware pipeline.
 
-## 🚀 Key Features
+## What the Agent Can Do
 
-*   **Parallel Analytic Pipeline**: Automatically segments scenes, identifies characters, maps emotional entities, and generates a "Skills Index" for efficient retrieval.
-*   **ReAct Conversational Agent**: A stateful chat interface that uses structured reasoning (Thought → Tool → Observation) to answer complex queries about the script.
-*   **Context Budget Management**: Zero-latency token tracking with multi-stage compression (Offloading, Trimming, Anchoring) to sustain long-running conversations.
-*   **Premium Streaming UI**: A stunning Glassmorphism dashboard built with Streamlit, featuring real-time processing indicators and a "Brain" expander for agent transparency.
+This system continuously processes and reasons about script content using an intelligent loop:
 
----
+1. **Upload & Initial Insight**: Upon script upload, a summary is generated instantly. Simultaneously, deep analysis for characters, entity mapping, and scene splitting run in the background.
+2. **Stateful Conversation**: A ReAct (Reasoning and Acting) agent powered by LangGraph maintains conversation memory. It autonomously determines when to use specialized tools to pull deep insights from pre-generated analysis files to answer your questions.
+3. **Context Budget Management**: Automated context engineering manages the LLM context window. When the budget hits 40% of the model's limit, the system compresses the conversation history and drops the raw script to maintain optimal performance and reduce costs.
 
-## 🏗️ Core Architecture
+## Core Design Principles
 
-The system is split into two primary engines:
+- **Progressive Disclosure**: The system is built to provide immediate value while doing heavy lifting in the background. The script summary is shown instantly to the user, while background analysis completes silently. Deeper insights are retrieved on-demand as the user asks specific questions.
+- **Shared KV-Cache Prefix**: Background tasks (Summary, Character Analysis, Entity Mapping, Scene Splitting) share a common system prompt and script prefix to maximize AI prompt caching performance, significantly reducing latency and cost.
+- **Parallel Processing**: Initial background tasks execute concurrently using `asyncio`.
+- **Skill-based Architecture & Unified Context**: Generated analysis files (e.g., character traits, scene entities) are treated as modular "skills." The agent dynamically loads only the required skill files into its working memory when needed to answer a user's question, rather than stuffing the entire context at once.
+- **Interactive Feedback**: Every agent response generates relevant follow-up "chips" to guide the user deeper into the analysis.
 
-### 1. The Ingestion Pipeline (`core/pipeline.py`)
-Triggered immediately upon upload, this Phase 1 engine uses **LangGraph** to orchestrate several parallel specialized agents:
-- **Summary Agent**: Generates the initial narrative arc and follow-up chips.
-- **Character Analyst**: Extracts roles, arcs, and relationships.
-- **Entity Mapper**: Maps scene-level narrative "entities" (hooks, reveals, cliffhangers).
-- **Scene Splitter**: Uses Python regex to segment the script into individual markdown files.
-- **Skills Index Builder**: Summarizes each scene in a batched, KV-cached call to create a retrieval index.
+## System Flow
 
-### 2. The Interaction Agent (`agents/conversation_graph.py`)
-The Phase 2 conversation loop handles user queries after ingestion.
-- **Structured Output**: Uses **Instructor** to force the agent into a `thought` and `tool_name` schema.
-- **Dynamic Prompting**: Injects the `skills_index.md` into the system prompt turn-by-turn so the agent knows exactly which scene files to "load" for context.
-- **Tool Retrieval**: Instead of loading the whole script, the agent selectively calls `load_file` to read characters, entities, or specific scenes.
+```mermaid
+flowchart TD
+    Upload(["🎬 Script Upload\nStreamlit file input"]):::gray --> Pre["Validate & Preprocess\nextract text · metadata"]:::gray
+    Pre --> Lock(["🔒 UI Locked\ntyping bar hidden"]):::gray
+    Lock --> Prefix["Shared Prefix Builder\nsystem: static analyst prompt\nuser: script text\nassistant: Script received\nKV Cache Boundary"]:::teal
 
----
+    Prefix -->|"seed cache"| SA["Summary Agent"]:::purple
+    Prefix -->|"Background Parallel"| CA["Character Analyst"]:::coral
+    Prefix -->|"Background Parallel"| EM["Entity Mapper"]:::amber
+    Prefix -->|"Background Parallel"| SS["Scene Splitter"]:::teal
 
-## 🛠️ Tech Stack
+    SA -->|"resolves first"| SUM(["✅ Summary shown\n+ follow-up questions\ntyping bar unlocked"]):::purple
 
-- **LLM**: GPT-4o / GPT-4o-mini (via OpenAI & Instructor)
-- **Orchestration**: LangGraph (Stateful Graphs & Parallel Execution)
-- **Structured Data**: Pydantic
-- **Frontend**: Streamlit (with custom CSS/Glassmorphism)
-- **Text Processing**: `python-docx` & Regex
+    CA -->|"wait"| SI["Skills Index Builder"]:::teal
+    EM -->|"wait"| SI
+    SS -->|"wait"| SI
 
----
+    SI --> Fin["Finalize Context"]:::teal
+    Fin --> SC[("ScriptContext\n.md files ready")]:::teal
 
-## 🏁 How to Run
+    SUM -->|"user asks question"| Agent["LangGraph ReAct Agent\nUnified State Memory"]:::blue
+    SC -->|"file paths registered"| Agent
 
-1.  **Set up the environment**:
-    ```bash
-    conda create -n agent python=3.10
-    conda activate agent
-    pip install -r requirements.txt  # Or manually: streamlit, openai, instructor, langgraph, python-docx
-    ```
+    Agent -->|"needs data"| Tool{"execute_tool"}:::amber
+    Tool -->|"load_file / write_file"| Agent
+    Agent -->|"final_answer"| Response(["💬 Response\n+ follow-up questions"]):::gray
 
-2.  **Set your API Key**:
-    ```bash
-    export OPENAI_API_KEY='your-api-key-here'
-    ```
+    Response --> Budget{"Context at\n40% of limit?"}:::amber
+    Budget -->|"no"| Agent
+    Budget -->|"yes"| Compress["Context Compression\nRemove raw script from prompt\nCompress older turns"]:::coral
+    Compress --> Agent
 
-3.  **Launch the Dashboard**:
-    ```bash
-    streamlit run ui/app.py
-    ```
+    classDef gray   fill:#888780,stroke:#5F5E5A,color:#fff
+    classDef teal   fill:#1D9E75,stroke:#0F6E56,color:#fff
+    classDef purple fill:#7F77DD,stroke:#534AB7,color:#fff
+    classDef coral  fill:#D85A30,stroke:#993C1D,color:#fff
+    classDef amber  fill:#BA7517,stroke:#854F0B,color:#fff
+    classDef blue   fill:#185FA5,stroke:#0C447C,color:#fff
+```
 
----
+## Local Setup Guidelines
 
-## 📂 Project Structure
+Follow these steps to run the Script Analysis System locally:
 
-- `agents/`: Implementation of the specialized AI agents (Summary, Scene Splitter, etc.).
-- `core/`: Critical infrastructure (Pipeline, LLM client, Context Management, Prompts).
-- `models/`: Pydantic schemas for structured LLM outputs.
-- `ui/`: Streamlit dashboard and custom CSS assets.
-- `outputs/`: The structured knowledge base generated for each script (scenes, character MDs, etc.).
-- `tests/`: Automated verification scripts for Phases 1, 2, and 3.
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd content_agent
+   ```
+
+2. **Create and activate a virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows use: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Environment Variables**
+   Create a `.env` file in the root directory and add your OpenAI API key:
+   ```env
+   OPENAI_API_KEY=your-api-key-here
+   ```
+
+5. **Run the Application**
+   Launch the Streamlit UI:
+   ```bash
+   streamlit run ui/app.py
+   ```
+
+## Future Directions
+
+To further enhance the capabilities and robust nature of the agent, the following architectural and feature updates are planned:
+
+- **MCP Tool Server integration**: Transition the tool execution layer to act as a Model Context Protocol (MCP) server, standardizing how context and tools are provided.
+- **Long-term Memory**: Implement persistent cross-session memory (e.g., SQLite or Redis) allowing the agent to remember user preferences, previous script discussions, and ongoing narrative arcs.
+- **Prompt Density & Preference Optimization**: Refine prompts to increase information density and implement preference optimization (like DPO/RLHF algorithms) to better align with user styles.
+- **Proper Observation and Log Traces**: Integrate tracing tools (such as LangSmith, Phoenix, or OpenTelemetry) to monitor the LangGraph ReAct loops, token usage, tool failure rates, and agent reasoning paths for debugging and analytics.
