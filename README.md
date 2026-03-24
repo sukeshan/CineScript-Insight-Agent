@@ -101,7 +101,7 @@ Follow these steps to run the Script Analysis System locally:
    streamlit run ui/app.py
    ```
 
-## Future Directions
+## Future Directions & Improvements
 
 To further enhance the capabilities and robust nature of the agent, the following architectural and feature updates are planned:
 
@@ -109,3 +109,8 @@ To further enhance the capabilities and robust nature of the agent, the followin
 - **Long-term Memory**: Implement persistent cross-session memory (e.g., SQLite or Redis) allowing the agent to remember user preferences, previous script discussions, and ongoing narrative arcs.
 - **Prompt Density & Preference Optimization**: Refine prompts to increase information density and implement preference optimization (like DPO/RLHF algorithms) to better align with user styles.
 - **Proper Observation and Log Traces**: Integrate tracing tools (such as LangSmith, Phoenix, or OpenTelemetry) to monitor the LangGraph ReAct loops, token usage, tool failure rates, and agent reasoning paths for debugging and analytics.
+- **Chunking + Map-Reduce**: Scalable ingestion for feature-length scripts.
+- **Streaming Tokens**: Stream tokens directly from each Phase 2 agent to Streamlit surfaces for lower perceived latency.
+- **Multi-Script Comparison Mode**: Compare two drafts side-by-side to show what changed in the character arcs or engagement.
+- **Fine-tuned Classifier for Entities**: Train a small, lightweight classifier for entity type labeling to completely remove the risk of LLM hallucinations in structured data.
+- **Confidence Scores**: Calculate and display confidence scores on engagement factors and emotion labels.
