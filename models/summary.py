@@ -22,7 +22,7 @@ class SummaryOutput(BaseModel):
     thoughts: list[SummaryThought] = Field(
         description=(
             "Chain-of-thought reasoning performed BEFORE writing the summary. "
-            "Generate 3-5 thoughts, each covering a distinct analytical angle: "
+            "Generate 3-4 thoughts, each covering a distinct analytical angle: "
             "(1) What is the plot setup and inciting incident? "
             "(2) What is the core conflict, who drives it, and what are the stakes? "
             "(3) What is the overall emotional tone, and does it shift? "
@@ -32,13 +32,10 @@ class SummaryOutput(BaseModel):
     )
     summary: list[str] = Field(
         description=(
-            "Concise bullet points summarising the script. "
-            "Each bullet should be one clear sentence written in present tense. "
-            "The summary should logically flow through key story beats: "
-            "setup (who, where, inciting event), conflict (central tension and stakes), "
-            "climax (revelation or confrontation), and resolution or cliffhanger. "
-            "Do NOT list character names as a cast list; weave them into the story arc. "
-            "Focus on story momentum, not description."
+            "3-4 punchy bullet points summarising the script. "
+            "Each bullet is one SHORT sentence (max 15 words) in present tense. "
+            "Cover: setup, conflict, climax, and ending — nothing more. "
+            "Be crisp, not elaborate. No cast lists."
         )
     )
     follow_up_questions: list[str] = Field(
