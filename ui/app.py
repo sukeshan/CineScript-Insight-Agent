@@ -6,13 +6,14 @@ import asyncio
 import json
 import os
 import sys
+import html
 
 import streamlit as st
 
 # Ensure project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.pipeline import process_script_stream
+from core.pipeline import get_summary_only, run_remaining_pipeline_stream
 from agents.conversation_graph import conversation_graph
 from core.prompts import build_main_prompt
 
@@ -259,6 +260,8 @@ def init_state():
         "context": None,
         "summary_out": None,
         "processing": False,
+        "pipeline_pending": False,
+        "script_text": ""
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -278,66 +281,110 @@ def run_async(coro):
         loop.close()
 
 
-# ── Pipeline Runner ──────────────────────────────────────────────────────────
+def run_async_stream(async_gen):
+    """Run an async generator in Streamlit's sync context and yield its items."""
+    loop = asyncio.new_event_loop()
+    try:
+        while True:
+            try:
+                yield loop.run_until_complete(async_gen.__anext__())
+            except StopAsyncIteration:
+                break
+    finally:
+        loop.close()
 
-async def _run_pipeline(script_text: str, status_container, summary_placeholder):
-    """Run pipeline and update UI status dynamically."""
+async def _finish_pipeline_async(status_container):
     results = []
-    
-    async for event_type, content in process_script_stream(script_text):
+    async for event_type, content in run_remaining_pipeline_stream(st.session_state.script_text, st.session_state.summary_out):
         if event_type == "status":
-            status_container.update(label=f"⏳ {content}", state="running")
-        elif event_type == "summary":
-            # Show summary immediately on the UI while other nodes keep running
-            summary_text = "\n".join(f"- {s}" for s in content.summary)
-            with summary_placeholder.container():
-                with st.chat_message("assistant", avatar="🎬"):
-                    st.markdown(summary_text)
-
-            results.append(("summary", content))
+            msg = content.get("message", "Processing...")
+            thoughts = content.get("thoughts", [])
+            status_container.update(label=f"⏳ {msg}", state="running")
+            for t in thoughts:
+                status_container.markdown(f"💭 *Thought:* {t}")
         elif event_type == "context":
             results.append(("context", content))
             
     status_container.update(label="✅ Analysis Complete!", state="complete")
     return results
 
+def finish_pipeline(status_container):
+    return run_async(_finish_pipeline_async(status_container))
+
 
 # ── Agent Runner ─────────────────────────────────────────────────────────────
 
-async def _run_agent(user_message: str):
-    skills_index_path = "outputs/skills_index.md"
-    if os.path.exists(skills_index_path):
-        with open(skills_index_path, "r") as f:
-            skills_content = f.read()
-        system_prompt = build_main_prompt(skills_content)
-    else:
-        system_prompt = build_main_prompt()
-
+async def _run_agent_async_stream(user_message: str):
     agent_msgs = list(st.session_state.agent_messages)
-
-    if agent_msgs and agent_msgs[0]["role"] == "system":
-        agent_msgs[0]["content"] = system_prompt
-    else:
-        agent_msgs.insert(0, {"role": "system", "content": system_prompt})
-
     agent_msgs.append({"role": "user", "content": user_message})
-
     state = {"messages": agent_msgs, "token_count": st.session_state.token_count}
 
-    steps = []
     async for event in conversation_graph.astream(state, stream_mode="updates"):
-        steps.append(event)
-
-    return steps
+        yield event
 
 
 def process_user_message(user_message: str):
     """Run the conversation graph and append results to chat history."""
-    steps = run_async(_run_agent(user_message))
+    if st.session_state.pipeline_pending:
+        st.session_state.processing = True
+        status_container = st.status("🚀 Finishing script analysis...", expanded=True)
+        results = finish_pipeline(status_container)
+        for event_type, data in results:
+            if event_type == "context":
+                st.session_state.context = data
+        st.session_state.pipeline_pending = False
+        st.session_state.processing = False
+
+    max_attempts = 2
+    steps = []
+    success = False
+    
+    for attempt in range(max_attempts):
+        try:
+            with st.status("🧠 Thinking...", expanded=True) as status_container:
+                for step in run_async_stream(_run_agent_async_stream(user_message)):
+                    steps.append(step)
+                    if "agent" in step:
+                        agent_msg = step["agent"]["messages"][-1]
+                        try:
+                            action = json.loads(agent_msg.get("content", "{}"))
+                            thought = action.get("thought", "")
+                            tool_name = action.get("tool_name", "")
+                            if thought:
+                                status_container.markdown(f"💭 **Thought:** {thought}")
+                            if tool_name and tool_name != "final_answer":
+                                status_container.markdown(f"🔧 **Running tool:** `{tool_name}`")
+                        except Exception:
+                            pass
+                    elif "tools" in step:
+                        status_container.markdown("✅ Generated observation")
+                    
+                    # Check for compression signal
+                    if "agent" in step and step["agent"].get("compression_triggered"):
+                        st.toast("📉 **Context Budget Exceeded**: Compressing conversation history to save tokens...", icon="💡")
+                        
+                status_container.update(label="✅ Response ready", state="complete")
+            success = True
+            break
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                st.toast("⚠️ LLM formatting failed. Retrying...")
+                import time
+                time.sleep(1)
+            else:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": "⚠️ **Failed to generate a response.** The AI model encountered repeated formatting errors. Please try asking again.",
+                    "chips": []
+                })
+                return
+
+    if not success:
+        return
 
     tool_activities = []
     final_response = ""
-    final_thought = ""
+    all_thoughts = []
     final_chips = []
 
     for step in steps:
@@ -346,12 +393,14 @@ def process_user_message(user_message: str):
             try:
                 action = json.loads(agent_msg.get("content", "{}"))
                 thought = action.get("thought", "")
+                if thought:
+                    all_thoughts.append(thought)
+                    
                 tool_name = action.get("tool_name", "")
                 tool_args = action.get("tool_args", {})
 
                 if tool_name == "final_answer":
-                    final_response = tool_args.get("response", "")
-                    final_thought = thought
+                    final_response = action.get("response", "")
                     final_chips = action.get("follow_up_chips", []) or []
                 elif tool_name in ["load_file", "write_file"]:
                     tool_activities.append(
@@ -362,6 +411,8 @@ def process_user_message(user_message: str):
 
         if "agent" in step and "token_count" in step["agent"]:
             st.session_state.token_count = step["agent"]["token_count"]
+            
+    final_thought = "\n\n".join(all_thoughts)
 
     # Update the persistent agent messages
     st.session_state.agent_messages.append({"role": "user", "content": user_message})
@@ -409,6 +460,8 @@ with st.sidebar:
 
         st.markdown("---")
         st.markdown(f"**Token Count**: `{st.session_state.token_count:,}`")
+    elif st.session_state.pipeline_pending:
+        st.info("Subflows (Characters, Entities) will begin processing automatically when you start chatting.")
     else:
         st.caption("Upload a script to begin analysis.")
 
@@ -419,7 +472,7 @@ st.markdown("# 🎬 Script Analysis Dashboard")
 
 # ── File Upload ──────────────────────────────────────────────────────────────
 
-if not st.session_state.context:
+if not st.session_state.summary_out:
     uploaded = st.file_uploader(
         "Upload your script (.docx)",
         type=["docx"],
@@ -432,46 +485,35 @@ if not st.session_state.context:
         from docx import Document
         doc = Document(uploaded)
         script_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        st.session_state.script_text = script_text
 
-        status_container = st.status("🚀 Starting pipeline...", expanded=False)
-        summary_placeholder = st.empty()
-        
-        results = run_async(_run_pipeline(script_text, status_container, summary_placeholder))
+        with st.status("🚀 Generating summary...", expanded=False) as status_container:
+            summary_out = run_async(get_summary_only(script_text))
+            status_container.update(label="✅ Summary Complete!", state="complete")
 
-        summary_out = None
-        context = None
-        
-        if results:
-            for event_type, data in results:
-                if event_type == "summary":
-                    summary_out = data
-                elif event_type == "context":
-                    context = data
+        st.session_state.summary_out = summary_out
+        st.session_state.pipeline_pending = True
+        st.session_state.processing = False
 
-        if summary_out and context:
-            st.session_state.summary_out = summary_out
-            st.session_state.context = context
-            st.session_state.processing = False
+        summary_text = "\n".join(f"- {s}" for s in summary_out.summary)
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": summary_text,
+            "chips": summary_out.follow_up_questions,
+        })
 
-            summary_text = "\n".join(f"- {s}" for s in summary_out.summary)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": summary_text,
-                "chips": summary_out.follow_up_questions,
-            })
+        st.session_state.agent_messages = [
+            {"role": "system", "content": build_main_prompt()},
+            {"role": "user", "content": f"Here is the script:\n\n{script_text}"},
+            {"role": "assistant", "content": f"Summary:\n\n{summary_text}"},
+        ]
 
-            st.session_state.agent_messages = [
-                {"role": "system", "content": build_main_prompt()},
-                {"role": "user", "content": f"Here is the script:\n\n{script_text}"},
-                {"role": "assistant", "content": f"Summary:\n\n{summary_text}"},
-            ]
-
-            st.rerun()
+        st.rerun()
 
 
 # ── Chat Interface ───────────────────────────────────────────────────────────
 
-if st.session_state.context:
+if st.session_state.summary_out:
     for msg in st.session_state.messages:
         role = msg["role"]
         with st.chat_message(role, avatar="🎬" if role == "assistant" else "👤"):
@@ -479,15 +521,15 @@ if st.session_state.context:
 
             if msg.get("thought"):
                 st.markdown(
-                    f'<details class="brain-expander"><summary>🧠 Agent Reasoning</summary>'
-                    f'{msg["thought"]}</details>',
+                    f'<details class="brain-expander"><summary>🧠 Agent Reasoning</summary>\n\n'
+                    f'{html.escape(msg["thought"])}\n</details>',
                     unsafe_allow_html=True,
                 )
 
             if msg.get("tool_activity"):
                 for tool_act in msg["tool_activity"]:
                     st.markdown(
-                        f'<div class="tool-indicator">🔧 {tool_act}</div>',
+                        f'<div class="tool-indicator">🔧 {html.escape(tool_act)}</div>',
                         unsafe_allow_html=True,
                     )
 
@@ -500,12 +542,18 @@ if st.session_state.context:
             for i, chip in enumerate(chips):
                 with chip_cols[i]:
                     if st.button(chip, key=f"chip_{len(st.session_state.messages)}_{i}"):
-                        st.session_state.messages.append({"role": "user", "content": chip})
-                        with st.chat_message("user", avatar="👤"):
-                            st.markdown(chip)
-                        with st.spinner("🧠 Thinking..."):
-                            process_user_message(chip)
+                        st.session_state.chip_clicked = chip
                         st.rerun()
+
+    # Deferred chip processing at root layout
+    if st.session_state.get("chip_clicked"):
+        chip = st.session_state.chip_clicked
+        st.session_state.chip_clicked = None
+        st.session_state.messages.append({"role": "user", "content": chip})
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(chip)
+        process_user_message(chip)
+        st.rerun()
 
     # Chat input
     user_input = st.chat_input(
@@ -517,6 +565,5 @@ if st.session_state.context:
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user", avatar="👤"):
             st.markdown(user_input)
-        with st.spinner("🧠 Thinking..."):
-            process_user_message(user_input)
+        process_user_message(user_input)
         st.rerun()

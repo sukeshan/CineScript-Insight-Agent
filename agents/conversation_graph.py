@@ -31,10 +31,11 @@ class AgentAction(BaseModel):
     tool_args: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "The arguments required for 'load_file' or 'write_file'. "
-            "- For 'load_file': Must contain {'filename': '<path to file>'}. "
-            "- For 'write_file': Must contain {'filepath': '<path>', 'content': '<markdown text>'}. "
-            "Leave empty if tool_name is 'final_answer'."
+            "REQUIRED dictionary of arguments for the chosen tool. YOU MUST NOT LEAVE THIS EMPTY if calling a tool. "
+            "It must be a valid JSON object containing the exact keys: "
+            "- If tool_name is 'load_file', you MUST return exactly: {\"filename\": \"<path to file>\"} "
+            "- If tool_name is 'write_file', you MUST return exactly: {\"filepath\": \"<path>\", \"content\": \"<markdown text>\"} "
+            "- If tool_name is 'final_answer', return an empty dictionary {}."
         )
     )
     response: str | None = Field(
