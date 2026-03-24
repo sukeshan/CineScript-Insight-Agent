@@ -1,7 +1,15 @@
 [project]
 name = "content-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-powered script analysis system with agentic storytelling insights"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "openai>=1.82.0",
+    "tiktoken>=0.9.0",
+    "pydantic>=2.0",
+    "streamlit>=1.45.0",
+    "python-docx>=1.1.0",
+    "PyPDF2>=3.0.0",
+    "python-dotenv>=1.1.0",
+]
