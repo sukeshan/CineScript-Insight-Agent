@@ -60,6 +60,43 @@ flowchart TD
     classDef blue   fill:#185FA5,stroke:#0C447C,color:#fff
 ```
 
+## Project Structure
+
+```
+script-analysis/
+│
+├── agents/                  # LangGraph nodes
+│   ├── summary.py           # Initial Summary Generator
+│   ├── characters.py        # Character Analyst
+│   ├── entity_mapper.py     # Entity Mapper
+│   ├── scene_splitter.py    # Script Scene Fragmenter
+│   ├── skills_index_builder.py # Skills/Files Indexer
+│   └── conversation_graph.py# Stateful ReAct Agent (LangGraph)
+│
+├── core/                    # Core logic & utilities
+│   ├── context.py           # ScriptContext source of truth
+│   ├── pipeline.py          # Pipeline orchestration
+│   ├── context_manager.py   # 40% threshold compression logic
+│   ├── llm.py               # Structured output & token tracking
+│   ├── prompts.py           # Dynamic system prompt builder
+│   └── tools.py             # Agent tools (load_file, write_file)
+│
+├── models/                  # Pydantic output schemas
+│   ├── entities.py
+│   ├── characters.py
+│   └── summary.py
+│
+├── ui/                      # Frontend
+│   └── app.py               # Streamlit Dashboard & Chat Interface
+│
+├── outputs/                 # Analysis assets (auto-generated)
+│   ├── character_analysis.md
+│   ├── entity_map.md
+│   └── skills_index.md
+│
+└── requirements.txt
+```
+
 ## Local Setup Guidelines
 
 Follow these steps to run the Script Analysis System locally:
