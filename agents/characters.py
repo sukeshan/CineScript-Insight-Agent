@@ -19,7 +19,7 @@ async def run_character_analysis(script: str) -> CharacterAnalysisOutput:
     ]
     
     # Use Instructor-based structured extraction
-    result = await call_llm_structured(
+    result, _usage = await call_llm_structured(
         messages=messages,
         response_model=CharacterAnalysisOutput,
         temperature=0.3

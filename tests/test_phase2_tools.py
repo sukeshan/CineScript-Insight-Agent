@@ -11,7 +11,7 @@ async def main():
         {"role": "user", "content": "How engaging is this script based on the entity map? Load the file, analyze it, and write a 2-sentence summary to `outputs/engagement_summary.md`."}
     ]
     
-    initial_state = {"messages": messages}
+    initial_state = {"messages": messages, "token_count": 0}
     
     print("🗣️ User: How engaging is this script based on the entity map? Load the file, analyze it, and write a 2-sentence summary to `outputs/engagement_summary.md`.\n")
     
@@ -30,6 +30,10 @@ async def main():
                         print(f"🧠 Thought: {action.get('thought')}")
                         if action.get("tool_name") == "final_answer":
                             print(f"💬 Assistant response:\n{action.get('tool_args', {}).get('response', '')}\n")
+                            if action.get("follow_up_chips"):
+                                print("🍟 Follow-up Chips:")
+                                for chip in action["follow_up_chips"]:
+                                    print(f"  → {chip}")
                         else:
                             print(f"🛠️  Assistant called tool: {action.get('tool_name')} with args: {action.get('tool_args')}")
                     except Exception:

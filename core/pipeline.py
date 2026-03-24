@@ -1,11 +1,13 @@
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, Any
 
 from langgraph.graph import StateGraph, END
 
 from agents.summary import run_summary
 from agents.characters import run_character_analysis
 from agents.entity_mapper import run_entity_mapper
+from agents.scene_splitter import run_scene_splitter
+from agents.skills_index_builder import run_skills_index_builder
 from models.summary import SummaryOutput
 from models.characters import CharacterAnalysisOutput
 from models.entities import EntityMapOutput
@@ -18,10 +20,11 @@ class PipelineState(TypedDict):
     """The state dictionary flowing through the Phase 1 graph."""
     raw_script: str
     
-    # Reducers: just overwrite with latest value
     summary: SummaryOutput | None
     characters_out: CharacterAnalysisOutput | None
     entities_out: EntityMapOutput | None
+    scene_files: list[dict[str, Any]] | None
+    skills_index_path: str | None
     
     # Final consolidated context
     context: ScriptContext | None
@@ -36,10 +39,9 @@ async def summary_node(state: PipelineState) -> dict:
 
 
 async def character_node(state: PipelineState) -> dict:
-    """Extract characters. Runs in parallel with entity mapping."""
+    """Extract characters. Runs in parallel with entity mapping and scene splitting."""
     chars = await run_character_analysis(state["raw_script"])
     
-    # Write to local markdown file immediately
     with open("outputs/character_analysis.md", "w", encoding="utf-8") as f:
         f.write("# Character Analysis\n\n")
         for char in chars.characters:
@@ -53,10 +55,9 @@ async def character_node(state: PipelineState) -> dict:
 
 
 async def entity_node(state: PipelineState) -> dict:
-    """Map scene entities. Runs in parallel with character extraction."""
+    """Map scene entities. Runs in parallel with character extraction and scene splitting."""
     entities = await run_entity_mapper(state["raw_script"])
     
-    # Write to local markdown file immediately
     with open("outputs/entity_map.md", "w", encoding="utf-8") as f:
         f.write("# Entity Map\n\n")
         f.write("| Scene | Type | Valence | Intensity | Eng. Delta | Pos % | Description |\n")
@@ -67,8 +68,21 @@ async def entity_node(state: PipelineState) -> dict:
     return {"entities_out": entities}
 
 
+async def scene_splitter_node(state: PipelineState) -> dict:
+    """Split script into individual scene markdown files. Runs in parallel."""
+    scenes = await run_scene_splitter(state["raw_script"])
+    return {"scene_files": scenes}
+
+
+async def skills_index_node(state: PipelineState) -> dict:
+    """Generate skills_index.md after scenes are split. Uses full script for KV cache hit."""
+    scenes = state.get("scene_files") or []
+    index_path = await run_skills_index_builder(scenes, state["raw_script"])
+    return {"skills_index_path": index_path}
+
+
 def finalize_node(state: PipelineState) -> dict:
-    """Consolodate everything into the final ScriptContext."""
+    """Consolidate everything into the final ScriptContext."""
     chars = state["characters_out"].characters if state["characters_out"] else []
     ents = state["entities_out"].entities if state["entities_out"] else []
     
@@ -77,6 +91,8 @@ def finalize_node(state: PipelineState) -> dict:
         summary="\n".join([f"- {s}" for s in state["summary"].summary]) if state.get("summary") else "",
         characters=chars,
         entity_map=ents,
+        scene_files=state.get("scene_files") or [],
+        skills_index_path=state.get("skills_index_path") or "",
         char_md_path="outputs/character_analysis.md",
         entity_md_path="outputs/entity_map.md",
         background_ready=True
@@ -87,28 +103,35 @@ def finalize_node(state: PipelineState) -> dict:
 # ── Graph Builder ─────────────────────────────────────────────────────────────
 
 def build_phase1_graph() -> StateGraph:
-    """Construct and compile the Phase 1 LangGraph."""
+    """
+    Construct and compile the Phase 1 LangGraph.
+    Flow: START → summary → [character, entity, scene_splitter] (parallel) → skills_index → finalize → END
+    """
     builder = StateGraph(PipelineState)
 
     # Add nodes
     builder.add_node("summary", summary_node)
     builder.add_node("character", character_node)
     builder.add_node("entity", entity_node)
+    builder.add_node("scene_splitter", scene_splitter_node)
+    builder.add_node("skills_index", skills_index_node)
     builder.add_node("finalize", finalize_node)
 
-    # Edge logic
-    # Start -> summary
+    # START → summary (seeds KV cache)
     builder.set_entry_point("summary")
 
-    # summary -> [character, entity] (Parallel Fan-out)
+    # summary → [character, entity, scene_splitter] (parallel fan-out)
     builder.add_edge("summary", "character")
     builder.add_edge("summary", "entity")
+    builder.add_edge("summary", "scene_splitter")
 
-    # [character, entity] -> finalize (Fan-in)
-    # LangGraph waits for all incoming edges to complete before running a node
-    builder.add_edge("character", "finalize")
-    builder.add_edge("entity", "finalize")
-    
+    # [character, entity, scene_splitter] → skills_index (fan-in)
+    builder.add_edge("character", "skills_index")
+    builder.add_edge("entity", "skills_index")
+    builder.add_edge("scene_splitter", "skills_index")
+
+    # skills_index → finalize → END
+    builder.add_edge("skills_index", "finalize")
     builder.add_edge("finalize", END)
 
     return builder.compile()
@@ -126,30 +149,28 @@ async def process_script_stream(script: str):
     """
     import os
     os.makedirs("outputs", exist_ok=True)
+    os.makedirs("outputs/scenes", exist_ok=True)
+    os.makedirs("outputs/skills", exist_ok=True)
     
     inputs = {
         "raw_script": script,
         "summary": None,
         "characters_out": None,
         "entities_out": None,
+        "scene_files": None,
+        "skills_index_path": None,
         "context": None
     }
     
     summary_yielded = False
     final_context = None
 
-    # Stream over node outputs as they complete
     async for event in phase1_graph.astream(inputs, stream_mode="updates"):
-        # `event` is a dict of {node_name: {state_updates}}
-        
-        # When summary node completes, yield its text immediately to unlock UI
         if "summary" in event and not summary_yielded:
             yield event["summary"]["summary"]
             summary_yielded = True
             
-        # When finalize node completes, capture the context
         if "finalize" in event:
             final_context = event["finalize"]["context"]
             
-    # Yield the final context dict at the end
     yield final_context

@@ -52,15 +52,28 @@ async def call_llm_structured(
     *,
     temperature: float = 0.3,
     max_retries: int = 2,
-) -> BaseModel:
+) -> tuple[BaseModel, dict[str, int]]:
     """
-    Async LLM call → validated Pydantic object.
-    Instructor handles JSON schema enforcement + retries automatically.
+    Async LLM call → validated Pydantic object + token usage.
+    Uses create_with_completion() to get usage stats from the API response.
+    Returns: (pydantic_model, {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N})
     """
     client = get_async_client()
-    return await client.create(
+    model, completion = await client.create_with_completion(
         response_model=response_model,
         messages=messages,
         temperature=temperature,
         max_retries=max_retries,
     )
+    
+    # Extract token usage from the raw OpenAI completion
+    usage = {}
+    if hasattr(completion, "usage") and completion.usage:
+        usage = {
+            "prompt_tokens": completion.usage.prompt_tokens or 0,
+            "completion_tokens": completion.usage.completion_tokens or 0,
+            "total_tokens": completion.usage.total_tokens or 0,
+        }
+    
+    return model, usage
+

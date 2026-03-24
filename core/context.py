@@ -19,9 +19,9 @@ class ScriptContext:
     entity_map: list[SceneEntity] = field(default_factory=list) # from Entity Mapper
     char_md_path: str = "outputs/character_analysis.md"
     entity_md_path: str = "outputs/entity_map.md"
+    scene_files: list[dict] = field(default_factory=list)       # from Scene Splitter
+    skills_index_path: str = "outputs/skills_index.md"          # from Skills Index Builder
     suggested_improvements: list[str] = field(default_factory=list)
-    # ↑ tracks what Improvement Coach already suggested — avoids repetition
     session_token_count: int = 0
-    # ↑ updated after every turn — triggers Phase 4 compression at 40% threshold
     background_ready: bool = False
-    # ↑ set to True when character + entity analysis complete
+

@@ -13,7 +13,7 @@ async def run_summary(script: str) -> SummaryOutput:
     ]
     
     # We use structured output for the summary, including CoT and chips
-    result = await call_llm_structured(
+    result, _usage = await call_llm_structured(
         messages=messages, 
         response_model=SummaryOutput,
         temperature=0.7

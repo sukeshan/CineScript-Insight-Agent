@@ -10,7 +10,6 @@ from core.context import ScriptContext
 from core.prompts import (
     SHARED_PREFIX_SYSTEM,
     MAIN_SYSTEM_PROMPT,
-    LOAD_FILE_TOOL,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "ScriptContext",
     "SHARED_PREFIX_SYSTEM",
     "MAIN_SYSTEM_PROMPT",
-    "LOAD_FILE_TOOL",
 ]

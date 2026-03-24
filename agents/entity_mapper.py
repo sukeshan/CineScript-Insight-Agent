@@ -14,7 +14,7 @@ async def run_entity_mapper(script: str) -> EntityMapOutput:
     ]
     
     # Use Instructor-based structured extraction
-    result = await call_llm_structured(
+    result, _usage = await call_llm_structured(
         messages=messages,
         response_model=EntityMapOutput,
         temperature=0.3
