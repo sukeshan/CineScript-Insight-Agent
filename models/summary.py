@@ -39,6 +39,7 @@ class SummaryOutput(BaseModel):
         )
     )
     follow_up_questions: list[str] = Field(
+        # Intial follow up questions are hardcoded, later we can make them dynamic
         description=(
             "Exactly 4 follow-up question chips shown as clickable buttons to the user. "
             "These must be: "

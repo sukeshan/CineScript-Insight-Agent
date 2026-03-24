@@ -87,7 +87,7 @@ async def agent_node(state: ConversationState) -> dict:
     if should_compress(current_token_count):
         compression_active = True
         current_messages = drop_raw_script_message(current_messages)
-        current_messages = truncate_to_window(current_messages, keep_last_n=10, keep_first=3)
+        current_messages = await truncate_to_window(current_messages, keep_last_n=10, keep_first=3)
     
     # 3. Call LLM — get both the structured response AND token usage from the API
     action, usage = await call_llm_structured(

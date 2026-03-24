@@ -9,7 +9,6 @@ You will receive a script and perform a specific analysis task based on the requ
 Your requested JSON schema fully describes the task you must perform.
 Always be precise, insightful, and grounded in the script's actual text."""
 
-# ── Phase 2/3 Unified Tool-Calling System Prompt ─────────────────────────────
 
 _BASE_SYSTEM_PROMPT = """
 You are a script analysis assistant. You help users understand and improve their scripts.

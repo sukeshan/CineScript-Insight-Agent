@@ -38,9 +38,14 @@ def get_turns(messages: list[dict[str, Any]]) -> list[list[int]]:
         turns.append(current_turn)
     return turns
 
-def truncate_to_window(messages: list[dict[str, Any]], keep_last_n: int = 10, keep_first: int = 3) -> list[dict[str, Any]]:
+from pydantic import BaseModel
+
+class TurnSummary(BaseModel):
+    summary: str
+
+async def truncate_to_window(messages: list[dict[str, Any]], keep_last_n: int = 10, keep_first: int = 3) -> list[dict[str, Any]]:
     """
-    Keeps the first N 'anchor' messages and the last M 'turns'.
+    Keeps the first N 'anchor' messages, summarizes dropped messages, and keeps the last M 'turns'.
     """
     if len(messages) <= keep_first:
         return messages
@@ -51,6 +56,37 @@ def truncate_to_window(messages: list[dict[str, Any]], keep_last_n: int = 10, ke
     turns = get_turns(rest)
     if len(turns) <= keep_last_n:
         return messages
+        
+    # Collect indices of turns to be dropped
+    dropped_turns_indices: list[int] = []
+    for turn in turns[:-keep_last_n]:
+        dropped_turns_indices.extend(turn)
+        
+    dropped_messages = [rest[i] for i in dropped_turns_indices]
+    
+    # Import LLM client here to avoid circular imports if any
+    from core.llm import call_llm_structured
+    
+    if dropped_messages:
+        formatted_dropped = "\n".join([f"{m['role']}: {m.get('content', '')}" for m in dropped_messages])
+        summary_request = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes conversation history to save context tokens. Keep the summary concise but preserve key facts, decisions, and context."},
+            {"role": "user", "content": f"Please summarize the following older conversation turns explicitly:\n\n{formatted_dropped}"}
+        ]
+        
+        try:
+            summary_model, _ = await call_llm_structured(summary_request, TurnSummary, temperature=0.1)
+            summary_message = {
+                "role": "assistant",
+                "content": f"[System: Older conversation summarized to save tokens]\nSummary:\n{summary_model.summary}"
+            }
+            anchors.append(summary_message)
+        except Exception as e:
+            # Fallback if summarization fails
+            anchors.append({
+                "role": "assistant",
+                "content": f"[System: Older conversation removed to save tokens. Summarization failed: {e}]"
+            })
         
     # Keep only the last N turns
     kept_turns_indices: list[int] = []
