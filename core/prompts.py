@@ -5,46 +5,9 @@ All agent system prompts and prompt templates.
 # ── Shared Prefix ─────────────────────────────────────────────────────────────
 # This text forms the KV-cache-friendly prefix shared by all Phase 1 agents.
 SHARED_PREFIX_SYSTEM = """You are a professional script analyst specialising in short-form content.
-You will receive a script and perform a specific analysis task.
+You will receive a script and perform a specific analysis task based on the requested output schema.
+Your requested JSON schema fully describes the task you must perform.
 Always be precise, insightful, and grounded in the script's actual text."""
-
-# ── Phase 1 Prompts ───────────────────────────────────────────────────────────
-
-SUMMARY_PROMPT = """Analyse the following script and generate a concise summary.
-
-Requirements:
-- Write exactly 3-4 sentences
-- Cover: plot setup, core conflict/stakes, emotional tone
-- Do NOT list characters — focus on the story arc
-- Write in present tense
-
-Return only the summary text, no headings or formatting."""
-
-CHARACTER_PROMPT = """Analyse the following script and extract all characters.
-
-For each character, provide:
-- name: character name
-- role: their role in the story (Protagonist, Antagonist, Catalyst, Supporting, etc.)
-- arc: their character arc as a short phrase using → notation (e.g. "Guilt → Absolution")
-- key_moments: list of 2-4 key moments involving this character
-- relationships: list of relationships with other characters (e.g. "Ex-girlfriend of Arjun")
-
-Return a JSON object with a single key "characters" containing a list of character objects.
-Return valid JSON only."""
-
-ENTITY_MAPPER_PROMPT = """Analyse the following script and map all storytelling entities at the scene level.
-
-For each scene/beat, extract an entity with:
-- scene_id: sequential number starting from 1
-- entity_type: one of ["hook", "conflict", "revelation", "false_death", "cliffhanger", "tension_build", "resolution"]
-- valence: float from -1.0 (sad/negative) to +1.0 (joyful/positive)
-- intensity: float from 0.0 (weak) to 1.0 (extremely strong)
-- engagement_delta: float from -1.0 to +1.0 (audience attention gain or loss)
-- position_pct: float from 0 to 100, where in the script this scene falls
-- description: one-line explanation of the moment
-
-Return a JSON object with a single key "entities" containing a list of entity objects.
-Return valid JSON only."""
 
 # ── Phase 2 Prompts ───────────────────────────────────────────────────────────
 
